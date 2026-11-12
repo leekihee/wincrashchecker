@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,10 +11,12 @@ namespace CrashLens
 {
     sealed class MainForm : Form
     {
-        readonly ComboBox cboDays = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90 };
-        readonly Button btnRun = new Button { Text = "분석", AutoSize = true };
-        readonly Button btnSave = new Button { Text = "리포트 저장", AutoSize = true, Enabled = false };
-        readonly Button btnCopy = new Button { Text = "리포트 복사", AutoSize = true, Enabled = false };
+        readonly Label lblPeriod = new Label { AutoSize = true, Padding = new Padding(0, 7, 0, 0) };
+        readonly ComboBox cboDays = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+        readonly Button btnRun = new Button { AutoSize = true };
+        readonly Button btnSave = new Button { AutoSize = true, Enabled = false };
+        readonly Button btnCopy = new Button { AutoSize = true, Enabled = false };
+        readonly ComboBox cboLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, Margin = new Padding(16, 3, 3, 3) };
         readonly Label lblStatus = new Label { AutoSize = true, Padding = new Padding(8, 7, 0, 0) };
         readonly ListView list = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false };
         readonly TabControl tabs = new TabControl { Dock = DockStyle.Fill };
@@ -22,39 +25,39 @@ namespace CrashLens
         readonly TextBox txtApps = MakeText();
         readonly TextBox txtChanges = MakeText();
 
+        static readonly int[] DayChoices = { 30, 90, 180, 365 };
         Snapshot snapshot;
         AnalysisResult result;
+        Incident selected;
 
         public MainForm()
         {
-            Text = "CrashLens — Windows 크래시·비정상 종료 분석기";
-            Font = new Font("Malgun Gothic", 9f);
+            // 기본 언어는 Windows 표시 언어를 따른다(한국어/베트남어, 그 외는 영어). 화면에서 바꿀 수 있다.
+            L.Current = L.FromCulture(CultureInfo.CurrentUICulture.Name);
+
+            Font = new Font("Segoe UI", 9f);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(1180, 760);
-            MinimumSize = new Size(820, 520);
+            MinimumSize = new Size(860, 520);
             StartPosition = FormStartPosition.CenterScreen;
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            cboDays.Items.AddRange(new object[] { "30일", "90일", "180일", "365일" });
-            cboDays.SelectedIndex = 1;
+            cboLang.Items.AddRange(new object[] { "한국어", "English", "Tiếng Việt" });
+            cboLang.SelectedIndex = (int)L.Current;
 
             var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(6), WrapContents = false };
-            top.Controls.Add(new Label { Text = "분석 기간", AutoSize = true, Padding = new Padding(0, 7, 0, 0) });
-            top.Controls.Add(cboDays);
-            top.Controls.Add(btnRun);
-            top.Controls.Add(btnSave);
-            top.Controls.Add(btnCopy);
-            top.Controls.Add(lblStatus);
+            top.Controls.AddRange(new Control[] { lblPeriod, cboDays, btnRun, btnSave, btnCopy, cboLang, lblStatus });
 
-            list.Columns.Add("기록 시각", 140);
-            list.Columns.Add("유형", 170);
-            list.Columns.Add("코드", 300);
-            list.Columns.Add("지목된 모듈", 240);
-            list.Columns.Add("추정", 280);
+            for (int i = 0; i < 5; i++) list.Columns.Add("");
+            int[] widths = { 140, 190, 300, 240, 290 };
+            for (int i = 0; i < 5; i++) list.Columns[i].Width = widths[i];
 
-            AddTab("종합 진단", txtOverall);
-            AddTab("선택 항목 상세", txtDetail);
-            AddTab("프로그램 오류", txtApps);
-            AddTab("변경·종료 이력", txtChanges);
+            foreach (var t in new[] { txtOverall, txtDetail, txtApps, txtChanges })
+            {
+                var page = new TabPage { Padding = new Padding(4) };
+                page.Controls.Add(t);
+                tabs.TabPages.Add(page);
+            }
 
             var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
             split.Panel1.Controls.Add(list);
@@ -62,14 +65,30 @@ namespace CrashLens
             Controls.Add(split);
             Controls.Add(top);
 
+            ApplyLanguage();
+            cboDays.SelectedIndex = 1;
+
             Shown += (s, e) => { split.SplitterDistance = Math.Max(120, split.Height / 3); RunAnalysis(); };
             btnRun.Click += (s, e) => RunAnalysis();
             btnSave.Click += (s, e) => SaveReport();
-            btnCopy.Click += (s, e) => { if (result != null) { Clipboard.SetText(Report.Full(snapshot, result)); lblStatus.Text = "리포트를 클립보드에 복사했습니다."; } };
+            btnCopy.Click += (s, e) =>
+            {
+                if (result == null) return;
+                Clipboard.SetText(Crlf(Report.Full(snapshot, result)));
+                lblStatus.Text = L.T("리포트를 클립보드에 복사했습니다.", "Report copied to the clipboard.", "Đã sao chép báo cáo vào clipboard.");
+            };
+            cboLang.SelectedIndexChanged += (s, e) =>
+            {
+                L.Current = (Lang)cboLang.SelectedIndex;
+                ApplyLanguage();
+                // 진단 문장은 분석 시점에 만들어지므로, 이미 수집한 자료로 다시 분석해 언어를 바꾼다(재수집 없음).
+                if (snapshot != null && btnRun.Enabled) { result = Analyzer.Analyze(snapshot); ShowResult(); }
+            };
             list.SelectedIndexChanged += (s, e) =>
             {
                 if (list.SelectedItems.Count == 0) return;
-                txtDetail.Text = Report.Detail((Incident)list.SelectedItems[0].Tag);
+                selected = (Incident)list.SelectedItems[0].Tag;
+                txtDetail.Text = Crlf(Report.Detail(selected));
                 tabs.SelectedIndex = 1;
             };
         }
@@ -79,20 +98,46 @@ namespace CrashLens
             return new TextBox
             {
                 Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = true, Dock = DockStyle.Fill,
-                BackColor = SystemColors.Window, Font = new Font("Malgun Gothic", 9.5f)
+                BackColor = SystemColors.Window, Font = new Font("Segoe UI", 9.75f)
             };
         }
 
-        void AddTab(string title, Control c)
+        void ApplyLanguage()
         {
-            var page = new TabPage(title) { Padding = new Padding(4) };
-            page.Controls.Add(c);
-            tabs.TabPages.Add(page);
+            Text = "CrashLens — " + L.T("Windows 크래시·비정상 종료 분석기", "Windows crash and abnormal shutdown analyzer", "Trình phân tích sự cố và tắt máy bất thường của Windows");
+            lblPeriod.Text = L.T("분석 기간", "Period", "Khoảng thời gian");
+            btnRun.Text = L.T("분석", "Analyze", "Phân tích");
+            btnSave.Text = L.T("리포트 저장", "Save report", "Lưu báo cáo");
+            btnCopy.Text = L.T("리포트 복사", "Copy report", "Sao chép báo cáo");
+
+            int sel = cboDays.SelectedIndex;
+            cboDays.Items.Clear();
+            foreach (var d in DayChoices) cboDays.Items.Add(L.F("{0}일", "{0} days", "{0} ngày", d));
+            if (sel >= 0) cboDays.SelectedIndex = sel;
+
+            string[] cols =
+            {
+                L.T("기록 시각", "Logged at", "Thời điểm ghi"),
+                L.T("유형", "Type", "Loại"),
+                L.T("코드", "Code", "Mã"),
+                L.T("지목된 모듈", "Named module", "Mô-đun được nêu"),
+                L.T("추정", "Likely area", "Phỏng đoán")
+            };
+            for (int i = 0; i < cols.Length; i++) list.Columns[i].Text = cols[i];
+
+            string[] tabNames =
+            {
+                L.T("종합 진단", "Diagnosis", "Chẩn đoán tổng hợp"),
+                L.T("선택 항목 상세", "Selected incident", "Chi tiết mục đã chọn"),
+                L.T("프로그램 오류", "Program failures", "Lỗi chương trình"),
+                L.T("변경·종료 이력", "Changes & shutdowns", "Thay đổi & tắt máy")
+            };
+            for (int i = 0; i < tabNames.Length; i++) tabs.TabPages[i].Text = tabNames[i];
         }
 
-        int SelectedDays()
+        string SelectHint()
         {
-            switch (cboDays.SelectedIndex) { case 0: return 30; case 2: return 180; case 3: return 365; default: return 90; }
+            return L.T("목록에서 항목을 선택하면 상세 내용이 표시됩니다.", "Select an item in the list to see its details.", "Chọn một mục trong danh sách để xem chi tiết.");
         }
 
         async void RunAnalysis()
@@ -100,33 +145,31 @@ namespace CrashLens
             if (!btnRun.Enabled) return;
             btnRun.Enabled = btnSave.Enabled = btnCopy.Enabled = false;
             list.Items.Clear();
-            txtDetail.Text = "목록에서 항목을 선택하면 상세 내용이 표시됩니다.";
-            int days = SelectedDays();
+            selected = null;
+            txtDetail.Text = SelectHint();
+            int days = DayChoices[Math.Max(0, cboDays.SelectedIndex)];
             try
             {
                 Snapshot snap = null;
-                AnalysisResult res = null;
-                await Task.Run(() =>
-                {
-                    snap = Collector.Collect(days, msg => BeginInvoke((Action)(() => lblStatus.Text = msg)));
-                    res = Analyzer.Analyze(snap);
-                });
-                snapshot = snap; result = res;
-                Show(snap, res);
-                lblStatus.Text = "완료 — 사건 " + res.Incidents.Count + "건, 이벤트 " + snap.Events.Count + "개 분석" + (snap.IsAdmin ? "" : "  (관리자 권한 아님: 덤프 목록 제외)");
+                await Task.Run(() => { snap = Collector.Collect(days, msg => BeginInvoke((Action)(() => lblStatus.Text = msg))); });
+                snapshot = snap;
+                result = Analyzer.Analyze(snap);
+                ShowResult();
                 btnSave.Enabled = btnCopy.Enabled = true;
             }
             catch (Exception ex)
             {
-                lblStatus.Text = "분석 실패";
-                txtOverall.Text = "분석 중 오류가 발생했습니다.\r\n\r\n" + ex;
+                lblStatus.Text = L.T("분석 실패", "Analysis failed", "Phân tích thất bại");
+                txtOverall.Text = L.T("분석 중 오류가 발생했습니다.", "An error occurred during analysis.", "Đã xảy ra lỗi khi phân tích.") + "\r\n\r\n" + ex;
             }
             finally { btnRun.Enabled = true; }
         }
 
-        void Show(Snapshot s, AnalysisResult r)
+        void ShowResult()
         {
+            var s = snapshot; var r = result;
             list.BeginUpdate();
+            list.Items.Clear();
             foreach (var inc in r.Incidents)
             {
                 var item = new ListViewItem(new[]
@@ -141,7 +184,11 @@ namespace CrashLens
             txtOverall.Text = Crlf(Report.Overall(s, r));
             txtApps.Text = Crlf(Report.Apps(r));
             txtChanges.Text = Crlf(Report.Changes(r));
+            txtDetail.Text = SelectHint();
+            selected = null;
             tabs.SelectedIndex = 0;
+            lblStatus.Text = L.F("완료 — 사건 {0}건, 이벤트 {1}개 분석", "Done — {0} incident(s), {1} events analyzed", "Xong — {0} sự cố, đã phân tích {1} sự kiện", r.Incidents.Count, s.Events.Count) +
+                (s.IsAdmin ? "" : "  " + L.T("(관리자 권한 아님: 덤프 목록 제외)", "(not administrator: dump list excluded)", "(không có quyền quản trị: bỏ qua danh sách dump)"));
         }
 
         static string Crlf(string t) { return t.Replace("\r\n", "\n").Replace("\n", "\r\n"); }
@@ -151,13 +198,13 @@ namespace CrashLens
             if (result == null) return;
             using (var dlg = new SaveFileDialog
             {
-                Filter = "텍스트 파일 (*.txt)|*.txt",
+                Filter = L.T("텍스트 파일", "Text file", "Tệp văn bản") + " (*.txt)|*.txt",
                 FileName = "CrashLens_" + Environment.MachineName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmm") + ".txt"
             })
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 File.WriteAllText(dlg.FileName, Crlf(Report.Full(snapshot, result)), new UTF8Encoding(true));
-                lblStatus.Text = "저장했습니다: " + dlg.FileName;
+                lblStatus.Text = L.T("저장했습니다: ", "Saved: ", "Đã lưu: ") + dlg.FileName;
             }
         }
     }

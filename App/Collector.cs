@@ -20,7 +20,7 @@ namespace CrashLens
             long ms = (long)days * 24 * 3600 * 1000;
             string time = "TimeCreated[timediff(@SystemTime) <= " + ms + "]";
 
-            progress("시스템 로그 읽는 중…");
+            progress(L.T("시스템 로그 읽는 중…", "Reading the System log…", "Đang đọc nhật ký System…"));
             ReadLog(s, "System",
                 "*[System[" + time + " and (" +
                 "Provider[@Name='" + Analyzer.PBug + "']" +
@@ -32,7 +32,7 @@ namespace CrashLens
                 " or (Provider[@Name='Microsoft-Windows-WindowsUpdateClient'] and EventID=19)" +
                 ")]]", null);
 
-            progress("응용 프로그램 로그 읽는 중…");
+            progress(L.T("응용 프로그램 로그 읽는 중…", "Reading the Application log…", "Đang đọc nhật ký Application…"));
             ReadLog(s, "Application",
                 "*[System[" + time + " and (" +
                 "(Provider[@Name='" + Analyzer.PWer + "'] and EventID=1001)" +
@@ -44,10 +44,10 @@ namespace CrashLens
                 // WER 1001은 앱 크래시 보고가 대부분이라 커널 관련 보고만 남긴다(앱 크래시는 Application Error로 집계).
                 e => e.Provider != Analyzer.PWer || Analyzer.WerEventName(e) != "");
 
-            progress("덤프 파일 확인 중…");
+            progress(L.T("덤프 파일 확인 중…", "Checking dump files…", "Đang kiểm tra tệp dump…"));
             ReadDumps(s);
 
-            progress("시스템 정보 읽는 중…");
+            progress(L.T("시스템 정보 읽는 중…", "Reading system information…", "Đang đọc thông tin hệ thống…"));
             ReadSystemInfo(s);
             return s;
         }
@@ -103,7 +103,7 @@ namespace CrashLens
             }
             catch (Exception ex)
             {
-                s.Warnings.Add(log + " 로그를 읽지 못했습니다: " + ex.Message);
+                s.Warnings.Add(L.F("{0} 로그를 읽지 못했습니다: {1}", "Could not read the {0} log: {1}", "Không đọc được nhật ký {0}: {1}", log, ex.Message));
             }
         }
 
@@ -180,7 +180,7 @@ namespace CrashLens
                     }
                 }
             }
-            catch (Exception ex) { s.Warnings.Add("네트워크 드라이버 목록을 읽지 못했습니다: " + ex.Message); }
+            catch (Exception ex) { s.Warnings.Add(L.T("네트워크 드라이버 목록을 읽지 못했습니다: ", "Could not read the network driver list: ", "Không đọc được danh sách trình điều khiển mạng: ") + ex.Message); }
         }
 
         static string Wmi(string query, Func<ManagementObject, string> pick)

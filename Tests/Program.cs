@@ -67,7 +67,7 @@ static class Program
         ev.Add(new RawEvent { Time = T("10-20 18:00:00"), Log = "System", Provider = "Microsoft-Windows-UserPnp", Id = 20001,
             Message = "Driver Management concluded the process to install driver axusbeth.inf for Device Instance ID USB\\VID_0B95&PID_1790." });
         ev.Add(new RawEvent { Time = T("11-01 02:00:00"), Log = "System", Provider = "User32", Id = 1074,
-            Props = new List<string> { "TrustedInstaller.exe", "PC", "운영 체제: 업그레이드(계획됨)", "0x80020003", "다시 시작", "", "NT AUTHORITY\\SYSTEM" } });
+            Props = new List<string> { "TrustedInstaller.exe", "PC", "Operating System: Upgrade (Planned)", "0x80020003", "restart", "", "NT AUTHORITY\\SYSTEM" } });
 
         s.Dumps.Add(new DumpFile { Path = "C:\\Windows\\Minidump\\102326-14062-01.dmp", Time = T("10-23 13:00:36"), Size = 1133308 });
         s.Dumps.Add(new DumpFile { Path = "C:\\Windows\\Minidump\\102826-12500-01.dmp", Time = T("10-28 11:25:25"), Size = 1224788 });
@@ -75,6 +75,7 @@ static class Program
         s.NetDrivers.Add(new DriverInfo { Device = "ASIX USB to Gigabit Ethernet Family Adapter", Provider = "ASIX", Version = "4.22.1.0", Date = "2026-01-05" });
         s.NetDrivers.Add(new DriverInfo { Device = "Tailscale Tunnel", Provider = "WireGuard LLC", Version = "0.14.0.0" });
 
+        L.Current = Lang.Ko;
         var r = Analyzer.Analyze(s);
         var blue = r.Incidents.Where(i => i.Kind == IncidentKind.BlueScreen).ToList();
         var d1 = blue.Where(i => i.Code == 0xD1).ToList();
@@ -126,8 +127,34 @@ static class Program
         var r2 = Analyzer.Analyze(s2);
         Check(r2.Findings.Any(f => f.Title.Contains("서로 다른 종류")), "서로 다른 메모리 계열 3종 → 메모리/하드웨어 의심");
 
+        // 영어·베트남어: 번역이 빠진 문구(한글 잔존)가 없어야 한다
+        Console.WriteLine("[3개 국어]");
+        Check(L.FromCulture("ko-KR") == Lang.Ko && L.FromCulture("vi-VN") == Lang.Vi && L.FromCulture("en-US") == Lang.En && L.FromCulture("ja-JP") == Lang.En, "Windows 표시 언어 → 기본 언어 선택");
+        string koFull = Report.Full(s, r);
+        foreach (var lang in new[] { Lang.En, Lang.Vi })
+        {
+            L.Current = lang;
+            var rr = Analyzer.Analyze(s);
+            string full = Report.Full(s, rr) + Report.Full(s2, Analyzer.Analyze(s2));
+            foreach (var kv in Knowledge.Bugchecks) full += kv.Value.Meaning + " " + kv.Value.Causes;
+            foreach (var kv in Knowledge.LiveCodes) full += kv.Value;
+            foreach (var c in new[] { "network", "gpu", "storage", "usb", "kernel", "hardware", "audio", "thirdparty" }) full += Knowledge.CategoryLabel(c) + Knowledge.CategoryAdvice(c);
+            foreach (IncidentKind k in Enum.GetValues(typeof(IncidentKind))) full += Report.KindLabel(k);
+            var hangul = full.Where(ch => ch >= 0xAC00 && ch <= 0xD7A3).Take(20).ToArray();
+            Check(hangul.Length == 0, lang + ": 한글 잔존 없음" + (hangul.Length > 0 ? " → " + new string(hangul) : ""));
+            Check(rr.Findings.Count == r.Findings.Count && rr.Findings[0].Body.Contains("ASIX"), lang + ": 진단 개수·내용이 한국어와 동일");
+            Check(full != koFull && full.Length > 2000, lang + ": 리포트 생성");
+            if (lang == Lang.Vi) Check(full.Contains("Màn hình xanh") && full.Contains("trình điều khiển"), "Vi: 베트남어 문구 확인");
+            if (lang == Lang.En) Check(full.Contains("Same blue screen repeated 8 times"), "En: 영어 문구 확인");
+        }
+        string enSample = "", viSample = "";
+        L.Current = Lang.En; enSample = Report.Overall(s, Analyzer.Analyze(s));
+        L.Current = Lang.Vi; viSample = Report.Overall(s, Analyzer.Analyze(s));
+        L.Current = Lang.Ko; r = Analyzer.Analyze(s);
+
         Console.WriteLine();
-        Console.WriteLine(Report.Overall(s, r));
+        Console.WriteLine(enSample);
+        Console.WriteLine(viSample);
         Console.WriteLine(Report.Detail(d1.Single(i => i.Time == T("10-28 11:25:18"))));
         Console.WriteLine(fails == 0 ? "ALL PASSED" : fails + " FAILED");
         Environment.Exit(fails == 0 ? 0 : 1);

@@ -275,7 +275,7 @@ namespace CrashLens.Core
                     if (m.Success) app = m.Groups[1].Value;
                     m = Regex.Match(e.Text, @"Exception Info:\s*([A-Za-z0-9_\.`]+)");
                     if (m.Success) code = m.Groups[1].Value;
-                    module = ".NET 미처리 예외";
+                    module = L.T(".NET 미처리 예외", ".NET unhandled exception", "Ngoại lệ .NET không được xử lý");
                 }
                 else continue;
                 app = app.Trim();
@@ -298,17 +298,17 @@ namespace CrashLens.Core
             foreach (var e in evs)
             {
                 if (e.Provider == "Microsoft-Windows-WindowsUpdateClient" && e.Id == 19)
-                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = "Windows 업데이트", Text = FirstNonEmpty(e.Prop(0), FirstLine(e.Message)) });
+                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = L.T("Windows 업데이트", "Windows update", "Cập nhật Windows"), Text = FirstNonEmpty(e.Prop(0), FirstLine(e.Message)) });
                 else if (e.Provider == "Microsoft-Windows-UserPnp" && e.Id == 20001)
-                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = "드라이버 설치", Text = FirstLine(e.Message) != "" ? FirstLine(e.Message) : string.Join(" | ", e.Props.Take(4)) });
+                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = L.T("드라이버 설치", "Driver install", "Cài trình điều khiển"), Text = FirstLine(e.Message) != "" ? FirstLine(e.Message) : string.Join(" | ", e.Props.Take(4)) });
                 else if (e.Provider == "MsiInstaller" && e.Id == 11707)
-                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = "프로그램 설치", Text = FirstNonEmpty(e.Prop(0), FirstLine(e.Message)) });
+                    r.Changes.Add(new ChangeItem { Time = e.Time, Kind = L.T("프로그램 설치", "Program install", "Cài chương trình"), Text = FirstNonEmpty(e.Prop(0), FirstLine(e.Message)) });
                 else if (e.Provider == "User32" && e.Id == 1074)
                     r.Shutdowns.Add(new ChangeItem
                     {
                         Time = e.Time,
-                        Kind = FirstNonEmpty(e.Prop(4), "종료"),
-                        Text = string.Format("{0} / 사유: {1} / 사용자: {2}", e.Prop(0), FirstNonEmpty(e.Prop(2), "-"), FirstNonEmpty(e.Prop(6), "-"))
+                        Kind = FirstNonEmpty(e.Prop(4), L.T("종료", "Shutdown", "Tắt máy")),
+                        Text = L.F("{0} / 사유: {1} / 사용자: {2}", "{0} / reason: {1} / user: {2}", "{0} / lý do: {1} / người dùng: {2}", e.Prop(0), FirstNonEmpty(e.Prop(2), "-"), FirstNonEmpty(e.Prop(6), "-"))
                     });
             }
             r.Changes.Sort((a, b) => b.Time.CompareTo(a.Time));
